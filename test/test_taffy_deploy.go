@@ -35,18 +35,20 @@ func (s *TaffyDeploySuite) deployWithTaffy(t *c.C, app *ct.App, env, meta, githu
 		}
 	}
 
-	rwc, err := client.RunJobAttached("taffy", &ct.NewJob{
-		ReleaseID:  taffyRelease.ID,
-		ReleaseEnv: true,
-		Cmd:        args,
-		Meta: map[string]string{
-			"github":      "true",
-			"github_user": github["user"],
-			"github_repo": github["repo"],
-			"branch":      github["branch"],
-			"rev":         github["rev"],
-			"clone_url":   github["clone_url"],
-			"app":         app.ID,
+	rwc, err := client.RunJobAttached("taffy", &ct.JobRequest{
+		ReleaseID: taffyRelease.ID,
+		Config: &ct.JobConfig{
+			ReleaseEnv: true,
+			Cmd:        args,
+			Meta: map[string]string{
+				"github":      "true",
+				"github_user": github["user"],
+				"github_repo": github["repo"],
+				"branch":      github["branch"],
+				"rev":         github["rev"],
+				"clone_url":   github["clone_url"],
+				"app":         app.ID,
+			},
 		},
 	})
 	t.Assert(err, c.IsNil)

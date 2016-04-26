@@ -72,6 +72,7 @@ type Scheduler struct {
 	rectify           chan struct{}
 	hostEvents        chan *discoverd.Event
 	formationEvents   chan *ct.ExpandedFormation
+	jobRequestEvents  chan *ct.ExpandedJobRequest
 	putJobs           chan *ct.Job
 	placementRequests chan *PlacementRequest
 
@@ -96,37 +97,43 @@ type Scheduler struct {
 	// generateJobUUID generates a UUID for new job IDs and is overridden in tests
 	// to make them more predictable
 	generateJobUUID func() string
+
+	// pendingJobRequests is used to track pending job requests to avoid
+	// starting more than one job for a given request
+	pendingJobRequests map[string]struct{}
 }
 
 func NewScheduler(cluster utils.ClusterClient, cc utils.ControllerClient, disc Discoverd, l log15.Logger) *Scheduler {
 	return &Scheduler{
-		ControllerClient:  cc,
-		ClusterClient:     cluster,
-		discoverd:         disc,
-		logger:            l,
-		backoffPeriod:     getBackoffPeriod(),
-		maxHostChecks:     defaultMaxHostChecks,
-		hosts:             make(map[string]*Host),
-		jobs:              make(map[string]*Job),
-		formations:        make(Formations),
-		jobEvents:         make(chan *host.Event, eventBufferSize),
-		stop:              make(chan struct{}),
-		syncJobs:          make(chan struct{}, 1),
-		syncFormations:    make(chan struct{}, 1),
-		syncHosts:         make(chan struct{}, 1),
-		hostChecks:        make(chan struct{}, 1),
-		rectifyBatch:      make(map[utils.FormationKey]struct{}),
-		rectify:           make(chan struct{}, 1),
-		formationEvents:   make(chan *ct.ExpandedFormation, eventBufferSize),
-		hostEvents:        make(chan *discoverd.Event, eventBufferSize),
-		putJobs:           make(chan *ct.Job, eventBufferSize),
-		placementRequests: make(chan *PlacementRequest, eventBufferSize),
-		formationlessJobs: make(map[utils.FormationKey]map[string]*Job),
-		getJobs:           make(chan Jobs),
-		pendingTagJobs:    make(map[string]*Job),
-		pause:             make(chan struct{}),
-		resume:            make(chan struct{}),
-		generateJobUUID:   random.UUID,
+		ControllerClient:   cc,
+		ClusterClient:      cluster,
+		discoverd:          disc,
+		logger:             l,
+		backoffPeriod:      getBackoffPeriod(),
+		maxHostChecks:      defaultMaxHostChecks,
+		hosts:              make(map[string]*Host),
+		jobs:               make(map[string]*Job),
+		formations:         make(Formations),
+		jobEvents:          make(chan *host.Event, eventBufferSize),
+		stop:               make(chan struct{}),
+		syncJobs:           make(chan struct{}, 1),
+		syncFormations:     make(chan struct{}, 1),
+		syncHosts:          make(chan struct{}, 1),
+		hostChecks:         make(chan struct{}, 1),
+		rectifyBatch:       make(map[utils.FormationKey]struct{}),
+		rectify:            make(chan struct{}, 1),
+		formationEvents:    make(chan *ct.ExpandedFormation, eventBufferSize),
+		jobRequestEvents:   make(chan *ct.ExpandedJobRequest, eventBufferSize),
+		hostEvents:         make(chan *discoverd.Event, eventBufferSize),
+		putJobs:            make(chan *ct.Job, eventBufferSize),
+		placementRequests:  make(chan *PlacementRequest, eventBufferSize),
+		formationlessJobs:  make(map[utils.FormationKey]map[string]*Job),
+		getJobs:            make(chan Jobs),
+		pendingTagJobs:     make(map[string]*Job),
+		pause:              make(chan struct{}),
+		resume:             make(chan struct{}),
+		generateJobUUID:    random.UUID,
+		pendingJobRequests: make(map[string]struct{}),
 	}
 }
 
@@ -224,6 +231,64 @@ func (s *Scheduler) streamFormationEvents() error {
 	}
 }
 
+func (s *Scheduler) streamJobRequests() error {
+	log := s.logger.New("fn", "streamJobRequests")
+
+	var reqs chan *ct.JobRequest
+	var stream stream.Stream
+	connect := func() (err error) {
+		log.Info("connecting job request stream")
+		reqs = make(chan *ct.JobRequest, eventBufferSize)
+		stream, err = s.StreamJobRequests(reqs)
+		if err != nil {
+			log.Error("error connecting job request stream", "err", err)
+		}
+		return
+	}
+	strategy := attempt.Strategy{Delay: 100 * time.Millisecond, Total: time.Minute}
+	if err := strategy.Run(connect); err != nil {
+		return err
+	}
+
+	// get the currently pending requests, trying multiple times
+	var pending []*ct.ExpandedJobRequest
+	err := strategy.Run(func() (err error) {
+		pending, err = s.JobRequestListPending()
+		return
+	})
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		// send the currently pending requests first
+		for _, req := range pending {
+			s.jobRequestEvents <- req
+		}
+
+		// read requests from the stream, reconnecting on failure
+	outer:
+		for {
+			for req := range reqs {
+				expanded, err := utils.ExpandJobRequest(s, req)
+				if err != nil {
+					log.Error("error expanding job request", "id", req.ID, "app.id", req.AppID, "release.id", req.ReleaseID, "artifact.ids", req.ArtifactIDs, "err", err)
+					continue
+				}
+				s.jobRequestEvents <- expanded
+			}
+			log.Warn("job request stream disconnected", "err", stream.Err())
+			for {
+				if err := connect(); err == nil {
+					continue outer
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}()
+	return nil
+}
+
 func (s *Scheduler) streamHostEvents() error {
 	log := s.logger.New("fn", "streamHostEvents")
 
@@ -300,6 +365,10 @@ func (s *Scheduler) Run() error {
 		return err
 	}
 
+	if err := s.streamJobRequests(); err != nil {
+		return err
+	}
+
 	isLeader, err := s.discoverd.Register()
 	if err != nil {
 		return err
@@ -372,6 +441,8 @@ func (s *Scheduler) Run() error {
 			s.HandleLeaderChange(isLeader)
 		case req := <-s.placementRequests:
 			s.HandlePlacementRequest(req)
+		case req := <-s.jobRequestEvents:
+			s.HandleJobRequest(req)
 		case e := <-s.hostEvents:
 			s.HandleHostEvent(e)
 		case <-s.hostChecks:
@@ -450,6 +521,23 @@ func (s *Scheduler) SyncJobs() (err error) {
 		if job.State == ct.JobStateStarting && j.state != JobStateStarting || job.State == ct.JobStateUp && j.state != JobStateRunning {
 			s.persistJob(j)
 		}
+	}
+
+	// ensure that all pending job requests are being handled
+	reqs, err := s.JobRequestListPending()
+	if err != nil {
+		if err == controller.ErrNotFound {
+			// a 404 means the controller is a version behind the scheduler (which
+			// can happen during an update), just ignore and wait for the next sync
+			// when the controller may be updated to the correct version
+			log.Warn("skipping controller job sync, controller missing pending job requests route")
+			return nil
+		}
+		log.Error("error getting controller pending job requests", "err", err)
+		return err
+	}
+	for _, req := range reqs {
+		s.HandleJobRequest(req)
 	}
 
 	return nil
@@ -670,6 +758,45 @@ func (s *Scheduler) HandleFormationChange(ef *ct.ExpandedFormation) {
 	s.handleFormation(ef)
 }
 
+func (s *Scheduler) HandleJobRequest(req *ct.ExpandedJobRequest) {
+	// if the request is no longer pending, clean up the request
+	// tracking and return
+	if req.State != ct.JobRequestStatePending {
+		delete(s.pendingJobRequests, req.ID)
+		return
+	}
+
+	// if we already started a job for this request, just ignore it (this
+	// avoids double starting a job if we receive the request both as an
+	// event and as part of SyncJobs at the same time)
+	if _, ok := s.pendingJobRequests[req.ID]; ok {
+		return
+	}
+
+	job := &Job{
+		ID:         s.generateJobUUID(),
+		Type:       req.Config.Type,
+		AppID:      req.App.ID,
+		ReleaseID:  req.Release.ID,
+		JobRequest: req,
+		startedAt:  time.Now(),
+		state:      JobStatePending,
+	}
+	s.jobs.Add(job)
+
+	// track the request so we only fulfil it once
+	s.pendingJobRequests[req.ID] = struct{}{}
+
+	s.logger.Info("fulfilling job request", "fn", "HandleJobRequest", "request.id", req.ID, "request.state", req.State, "app.id", req.App.ID, "release.id", req.Release.ID, "job.id", job.ID)
+
+	// persist the job so it gets assigned to the request and appears
+	// as pending in the database
+	req.JobID = job.ID
+	s.persistJob(job)
+
+	go s.StartJob(job)
+}
+
 func (s *Scheduler) HandlePlacementRequest(req *PlacementRequest) {
 	if !s.IsLeader() {
 		req.Error(ErrNotLeader)
@@ -692,8 +819,8 @@ func (s *Scheduler) HandlePlacementRequest(req *PlacementRequest) {
 		return
 	}
 
-	formation := req.Job.Formation
-	counts := s.jobs.GetHostJobCounts(formation.key(), req.Job.Type)
+	key := utils.FormationKey{AppID: req.Job.AppID, ReleaseID: req.Job.ReleaseID}
+	counts := s.jobs.GetHostJobCounts(key, req.Job.Type)
 	var minCount int = math.MaxInt32
 	for _, h := range s.SortedHosts() {
 		if h.shutdown {
@@ -1332,7 +1459,10 @@ func (s *Scheduler) findJobToStop(f *Formation, typ string) (*Job, error) {
 }
 
 func jobConfig(job *Job, hostID string) *host.Job {
-	return utils.JobConfig(job.Formation.ExpandedFormation, job.Type, hostID, job.ID)
+	if job.JobRequest != nil {
+		return utils.JobConfigRequest(job.JobRequest, hostID)
+	}
+	return utils.JobConfigFormation(job.Formation.ExpandedFormation, job.Type, hostID, job.ID)
 }
 
 func (s *Scheduler) Pause() {

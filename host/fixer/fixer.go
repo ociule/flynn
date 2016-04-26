@@ -337,7 +337,7 @@ func (f *ClusterFixer) StartScheduler(client *controller.Client, cf *ct.Formatio
 	if err != nil {
 		return err
 	}
-	schedulerJob := utils.JobConfig(ef, "scheduler", f.hosts[0].ID(), "")
+	schedulerJob := utils.JobConfigFormation(ef, "scheduler", f.hosts[0].ID(), "")
 	if err := f.hosts[0].AddJob(schedulerJob); err != nil {
 		return fmt.Errorf("error starting scheduler job on %s: %s", f.hosts[0].ID(), err)
 	}
