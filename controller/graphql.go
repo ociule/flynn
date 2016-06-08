@@ -1,19 +1,20 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/flynn/flynn/Godeps/_workspace/src/github.com/graphql-go/graphql"
-	"github.com/flynn/flynn/Godeps/_workspace/src/github.com/graphql-go/graphql/language/ast"
-	graphqlhandler "github.com/flynn/flynn/Godeps/_workspace/src/github.com/graphql-go/handler"
 	"github.com/flynn/flynn/Godeps/_workspace/src/golang.org/x/net/context"
 	ct "github.com/flynn/flynn/controller/types"
 	"github.com/flynn/flynn/host/types"
 	"github.com/flynn/flynn/pkg/httphelper"
 	"github.com/flynn/flynn/pkg/shutdown"
 	"github.com/flynn/flynn/router/types"
+	"github.com/graphql-go/graphql"
+	"github.com/graphql-go/graphql/language/ast"
+	graphqlhandler "github.com/graphql-go/handler"
 )
 
 var graphqlSchema graphql.Schema
@@ -42,6 +43,7 @@ var (
 	envObjectType       = newObjectType("EnvObject")
 	processesObjectType = newObjectType("ProcessesObject")
 	tagsObjectType      = newObjectType("TagsObject")
+	eventDataObjectType = newObjectType("EventDataObject")
 )
 
 var graphqlTimeType = graphql.NewScalar(graphql.ScalarConfig{
@@ -74,6 +76,33 @@ var graphqlTimeType = graphql.NewScalar(graphql.ScalarConfig{
 			return valueAST.GetValue()
 		}
 		return nil
+	},
+})
+
+var eventObjectTypeEnum = graphql.NewEnum(graphql.EnumConfig{
+	Name:        "EventType",
+	Description: "Type of event",
+	Values: graphql.EnumValueConfigMap{
+		string(ct.EventTypeApp):                  &graphql.EnumValueConfig{Value: ct.EventTypeApp},
+		string(ct.EventTypeAppDeletion):          &graphql.EnumValueConfig{Value: ct.EventTypeAppDeletion},
+		string(ct.EventTypeAppRelease):           &graphql.EnumValueConfig{Value: ct.EventTypeAppRelease},
+		string(ct.EventTypeDeployment):           &graphql.EnumValueConfig{Value: ct.EventTypeDeployment},
+		string(ct.EventTypeJob):                  &graphql.EnumValueConfig{Value: ct.EventTypeJob},
+		string(ct.EventTypeScale):                &graphql.EnumValueConfig{Value: ct.EventTypeScale},
+		string(ct.EventTypeRelease):              &graphql.EnumValueConfig{Value: ct.EventTypeRelease},
+		string(ct.EventTypeReleaseDeletion):      &graphql.EnumValueConfig{Value: ct.EventTypeReleaseDeletion},
+		string(ct.EventTypeArtifact):             &graphql.EnumValueConfig{Value: ct.EventTypeArtifact},
+		string(ct.EventTypeProvider):             &graphql.EnumValueConfig{Value: ct.EventTypeProvider},
+		string(ct.EventTypeResource):             &graphql.EnumValueConfig{Value: ct.EventTypeResource},
+		string(ct.EventTypeResourceDeletion):     &graphql.EnumValueConfig{Value: ct.EventTypeResourceDeletion},
+		string(ct.EventTypeResourceAppDeletion):  &graphql.EnumValueConfig{Value: ct.EventTypeResourceAppDeletion},
+		string(ct.EventTypeKey):                  &graphql.EnumValueConfig{Value: ct.EventTypeKey},
+		string(ct.EventTypeKeyDeletion):          &graphql.EnumValueConfig{Value: ct.EventTypeKeyDeletion},
+		string(ct.EventTypeRoute):                &graphql.EnumValueConfig{Value: ct.EventTypeRoute},
+		string(ct.EventTypeRouteDeletion):        &graphql.EnumValueConfig{Value: ct.EventTypeRouteDeletion},
+		string(ct.EventTypeDomainMigration):      &graphql.EnumValueConfig{Value: ct.EventTypeDomainMigration},
+		string(ct.EventTypeClusterBackup):        &graphql.EnumValueConfig{Value: ct.EventTypeClusterBackup},
+		string(ct.EventTypeAppGarbageCollection): &graphql.EnumValueConfig{Value: ct.EventTypeAppGarbageCollection},
 	},
 })
 
@@ -169,6 +198,16 @@ func routeFieldResolveFunc(fn func(*controllerAPI, *router.Route) (interface{}, 
 		api := p.Context.Value(apiContextKey).(*controllerAPI)
 		if route, ok := p.Source.(*router.Route); ok {
 			return fn(api, route)
+		}
+		return nil, nil
+	}
+}
+
+func eventFieldResolveFunc(fn func(*controllerAPI, *ct.Event) (interface{}, error)) graphql.FieldResolveFn {
+	return func(p graphql.ResolveParams) (interface{}, error) {
+		api := p.Context.Value(apiContextKey).(*controllerAPI)
+		if event, ok := p.Source.(*ct.Event); ok {
+			return fn(api, event)
 		}
 		return nil, nil
 	}
@@ -826,6 +865,58 @@ func init() {
 		},
 	})
 
+	eventObject := graphql.NewObject(graphql.ObjectConfig{
+		Name: "Event",
+		Fields: graphql.Fields{
+			"id": &graphql.Field{
+				Type:        graphql.NewNonNull(graphql.Int),
+				Description: "ID of event",
+				Resolve: eventFieldResolveFunc(func(_ *controllerAPI, event *ct.Event) (interface{}, error) {
+					return event.ID, nil
+				}),
+			},
+			"object_type": &graphql.Field{
+				Type:        eventObjectTypeEnum,
+				Description: "Type of event",
+				Resolve: eventFieldResolveFunc(func(_ *controllerAPI, event *ct.Event) (interface{}, error) {
+					return event.ObjectType, nil
+				}),
+			},
+			"object_id": &graphql.Field{
+				Type:        graphql.String,
+				Description: "UUID of object",
+				Resolve: eventFieldResolveFunc(func(_ *controllerAPI, event *ct.Event) (interface{}, error) {
+					return event.ObjectID, nil
+				}),
+			},
+			"data": &graphql.Field{
+				Type:        eventDataObjectType,
+				Description: "Event data",
+				Resolve: eventFieldResolveFunc(func(_ *controllerAPI, event *ct.Event) (interface{}, error) {
+					var data interface{}
+					return data, json.Unmarshal(event.Data, &data)
+				}),
+			},
+			"created_at": &graphql.Field{
+				Type:        graphqlTimeType,
+				Description: "Time event was created",
+				Resolve: eventFieldResolveFunc(func(_ *controllerAPI, event *ct.Event) (interface{}, error) {
+					return event.CreatedAt, nil
+				}),
+			},
+			"app": &graphql.Field{
+				Type:        appObject,
+				Description: "App event belongs to",
+				Resolve: eventFieldResolveFunc(func(api *controllerAPI, event *ct.Event) (interface{}, error) {
+					if event.AppID == "" {
+						return nil, nil
+					}
+					return api.appRepo.Get(event.AppID)
+				}),
+			},
+		},
+	})
+
 	formationObject.AddFieldConfig("app", &graphql.Field{
 		Type:        appObject,
 		Description: "App formation belongs to",
@@ -860,6 +951,73 @@ func init() {
 		Description: "Routes for app",
 		Resolve: appFieldResolveFunc(func(api *controllerAPI, app *ct.App) (interface{}, error) {
 			return api.routerc.ListRoutes(routeParentRef(app.ID))
+		}),
+	})
+	appObject.AddFieldConfig("events", &graphql.Field{
+		Type:        graphql.NewList(eventObject),
+		Description: "Events for app",
+		Args: graphql.FieldConfigArgument{
+			"object_types": &graphql.ArgumentConfig{
+				Description: "Filters events by object types",
+				Type:        graphql.NewList(graphql.String),
+			},
+			"object_id": &graphql.ArgumentConfig{
+				Description: "Filters events by object id",
+				Type:        graphql.String,
+			},
+			"app_id": &graphql.ArgumentConfig{
+				Description: "Filteres events by app id",
+				Type:        graphql.String,
+			},
+			"count": &graphql.ArgumentConfig{
+				Description: "Number of events to return",
+				Type:        graphql.Int,
+			},
+			"before_id": &graphql.ArgumentConfig{
+				Description: "Return only events before specified event id",
+				Type:        graphql.Int,
+			},
+			"since_id": &graphql.ArgumentConfig{
+				Description: "Return only events after specified event id",
+				Type:        graphql.Int,
+			},
+		},
+		Resolve: wrapResolveFunc(func(api *controllerAPI, p graphql.ResolveParams) (interface{}, error) {
+			app, ok := p.Source.(*ct.App)
+			if !ok {
+				return nil, nil
+			}
+			var beforeID *int64
+			if i, ok := p.Args["before_id"]; ok {
+				if id, ok := i.(int); ok {
+					id64 := int64(id)
+					beforeID = &id64
+				}
+			}
+			var sinceID *int64
+			if i, ok := p.Args["since_id"]; ok {
+				if id, ok := i.(int); ok {
+					id64 := int64(id)
+					sinceID = &id64
+				}
+			}
+			var count int
+			if i, ok := p.Args["count"]; ok {
+				if n, ok := i.(int); ok {
+					count = n
+				}
+			}
+			var objectTypes []string
+			if i, ok := p.Args["object_types"]; ok {
+				for _, v := range i.([]interface{}) {
+					objectTypes = append(objectTypes, v.(string))
+				}
+			}
+			var objectID string
+			if i, ok := p.Args["object_id"]; ok {
+				objectID = i.(string)
+			}
+			return api.eventRepo.ListEvents(app.ID, objectTypes, objectID, beforeID, sinceID, count)
 		}),
 	})
 
@@ -1005,7 +1163,84 @@ func init() {
 						return api.getRoute(p.Args["app"].(string), parts[0], parts[1])
 					}),
 				},
-				"event": nil,
+				"event": &graphql.Field{
+					Type: eventObject,
+					Args: graphql.FieldConfigArgument{
+						"id": &graphql.ArgumentConfig{
+							Description: "UUID of event",
+							Type:        graphql.NewNonNull(graphql.Int),
+						},
+					},
+					Resolve: wrapResolveFunc(func(api *controllerAPI, p graphql.ResolveParams) (interface{}, error) {
+						return api.eventRepo.GetEvent(int64(p.Args["id"].(int)))
+					}),
+				},
+				"events": &graphql.Field{
+					Type: graphql.NewList(eventObject),
+					Args: graphql.FieldConfigArgument{
+						"object_types": &graphql.ArgumentConfig{
+							Description: "Filters events by object types",
+							Type:        graphql.NewList(graphql.String),
+						},
+						"object_id": &graphql.ArgumentConfig{
+							Description: "Filters events by object id",
+							Type:        graphql.String,
+						},
+						"app_id": &graphql.ArgumentConfig{
+							Description: "Filteres events by app id",
+							Type:        graphql.String,
+						},
+						"count": &graphql.ArgumentConfig{
+							Description: "Number of events to return",
+							Type:        graphql.Int,
+						},
+						"before_id": &graphql.ArgumentConfig{
+							Description: "Return only events before specified event id",
+							Type:        graphql.Int,
+						},
+						"since_id": &graphql.ArgumentConfig{
+							Description: "Return only events after specified event id",
+							Type:        graphql.Int,
+						},
+					},
+					Resolve: wrapResolveFunc(func(api *controllerAPI, p graphql.ResolveParams) (interface{}, error) {
+						var appID string
+						if i, ok := p.Args["app_id"]; ok {
+							appID = i.(string)
+						}
+						var beforeID *int64
+						if i, ok := p.Args["before_id"]; ok {
+							if id, ok := i.(int); ok {
+								id64 := int64(id)
+								beforeID = &id64
+							}
+						}
+						var sinceID *int64
+						if i, ok := p.Args["since_id"]; ok {
+							if id, ok := i.(int); ok {
+								id64 := int64(id)
+								sinceID = &id64
+							}
+						}
+						var count int
+						if i, ok := p.Args["count"]; ok {
+							if n, ok := i.(int); ok {
+								count = n
+							}
+						}
+						var objectTypes []string
+						if i, ok := p.Args["object_types"]; ok {
+							for _, v := range i.([]interface{}) {
+								objectTypes = append(objectTypes, v.(string))
+							}
+						}
+						var objectID string
+						if i, ok := p.Args["object_id"]; ok {
+							objectID = i.(string)
+						}
+						return api.eventRepo.ListEvents(appID, objectTypes, objectID, beforeID, sinceID, count)
+					}),
+				},
 			},
 		}),
 		Mutation: nil,

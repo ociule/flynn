@@ -80,6 +80,12 @@ func (s *S) TestGraphQL(c *C) {
 					path
 					port
 				}
+
+				events(object_types: ["app", "release", "job"]) {
+					object_type
+					object_id
+					data
+				}
 			}
 
 			formation(app: "%s", release: "%s") {
@@ -145,6 +151,17 @@ func (s *S) TestGraphQL(c *C) {
 				app {
 					id
 				}
+			}
+
+			events(object_types: ["app", "deployment", "formation", "release"], since_id: 2, before_id: 5, count: 1) {
+				id
+				object_type
+				object_id
+			}
+
+			event(id: 5) {
+				object_type
+				object_id
 			}
 		}`, app.Name, app.ID, release.ID, release.ImageArtifactID(), release.ID, provider.ID, provider.ID, resource.ID, app.ID, route0.ID),
 		Variables: map[string]interface{}{},
