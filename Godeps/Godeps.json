@@ -1,7 +1,7 @@
 {
 	"ImportPath": "github.com/flynn/flynn",
 	"GoVersion": "go1.4",
-	"GodepVersion": "v70",
+	"GodepVersion": "v69",
 	"Packages": [
 		"./..."
 	],
@@ -727,6 +727,65 @@
 		{
 			"ImportPath": "github.com/gorilla/sessions",
 			"Rev": "aa5e036e6c44aec69a32eb41097001978b29ad31"
+		},
+		{
+			"ImportPath": "github.com/graphql-go/graphql",
+			"Comment": "v0.4.18",
+			"Rev": "a5cf5f205dfd1cec7d9c7a5e94f5f2084faf47bc"
+		},
+		{
+			"ImportPath": "github.com/graphql-go/graphql/gqlerrors",
+			"Comment": "v0.4.18",
+			"Rev": "a5cf5f205dfd1cec7d9c7a5e94f5f2084faf47bc"
+		},
+		{
+			"ImportPath": "github.com/graphql-go/graphql/language/ast",
+			"Comment": "v0.4.18",
+			"Rev": "a5cf5f205dfd1cec7d9c7a5e94f5f2084faf47bc"
+		},
+		{
+			"ImportPath": "github.com/graphql-go/graphql/language/kinds",
+			"Comment": "v0.4.18",
+			"Rev": "a5cf5f205dfd1cec7d9c7a5e94f5f2084faf47bc"
+		},
+		{
+			"ImportPath": "github.com/graphql-go/graphql/language/lexer",
+			"Comment": "v0.4.18",
+			"Rev": "a5cf5f205dfd1cec7d9c7a5e94f5f2084faf47bc"
+		},
+		{
+			"ImportPath": "github.com/graphql-go/graphql/language/location",
+			"Comment": "v0.4.18",
+			"Rev": "a5cf5f205dfd1cec7d9c7a5e94f5f2084faf47bc"
+		},
+		{
+			"ImportPath": "github.com/graphql-go/graphql/language/parser",
+			"Comment": "v0.4.18",
+			"Rev": "a5cf5f205dfd1cec7d9c7a5e94f5f2084faf47bc"
+		},
+		{
+			"ImportPath": "github.com/graphql-go/graphql/language/printer",
+			"Comment": "v0.4.18",
+			"Rev": "a5cf5f205dfd1cec7d9c7a5e94f5f2084faf47bc"
+		},
+		{
+			"ImportPath": "github.com/graphql-go/graphql/language/source",
+			"Comment": "v0.4.18",
+			"Rev": "a5cf5f205dfd1cec7d9c7a5e94f5f2084faf47bc"
+		},
+		{
+			"ImportPath": "github.com/graphql-go/graphql/language/typeInfo",
+			"Comment": "v0.4.18",
+			"Rev": "a5cf5f205dfd1cec7d9c7a5e94f5f2084faf47bc"
+		},
+		{
+			"ImportPath": "github.com/graphql-go/graphql/language/visitor",
+			"Comment": "v0.4.18",
+			"Rev": "a5cf5f205dfd1cec7d9c7a5e94f5f2084faf47bc"
+		},
+		{
+			"ImportPath": "github.com/graphql-go/handler",
+			"Rev": "52e6de4fccd785952dce42265f316acd43a3053f"
 		},
 		{
 			"ImportPath": "github.com/hashicorp/go-msgpack/codec",
