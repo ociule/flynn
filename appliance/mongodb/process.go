@@ -14,15 +14,15 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/flynn/flynn/Godeps/_workspace/src/gopkg.in/inconshreveable/log15.v2"
-	"github.com/flynn/flynn/Godeps/_workspace/src/gopkg.in/mgo.v2"
-	"github.com/flynn/flynn/Godeps/_workspace/src/gopkg.in/mgo.v2/bson"
 	mongodbxlog "github.com/flynn/flynn/appliance/mongodb/xlog"
 	"github.com/flynn/flynn/discoverd/client"
 	"github.com/flynn/flynn/pkg/shutdown"
 	"github.com/flynn/flynn/pkg/sirenia/client"
 	"github.com/flynn/flynn/pkg/sirenia/state"
 	"github.com/flynn/flynn/pkg/sirenia/xlog"
+	"gopkg.in/inconshreveable/log15.v2"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 )
 
 const (

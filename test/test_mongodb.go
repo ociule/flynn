@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"path/filepath"
 
-	c "github.com/flynn/flynn/Godeps/_workspace/src/github.com/flynn/go-check"
-	"github.com/flynn/flynn/Godeps/_workspace/src/gopkg.in/mgo.v2"
-	"github.com/flynn/flynn/Godeps/_workspace/src/gopkg.in/mgo.v2/bson"
 	ct "github.com/flynn/flynn/controller/types"
+	c "github.com/flynn/go-check"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 )
 
 type MongoDBSuite struct {
