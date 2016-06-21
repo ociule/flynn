@@ -28,8 +28,6 @@ type MongoDBSuite struct{}
 var _ = Suite(&MongoDBSuite{})
 
 func (MongoDBSuite) TestSingletonPrimary(c *C) {
-	// XXX(jpg): Broken in CI, debugging
-	c.Skip("broken")
 	p := NewProcess()
 	p.ID = "node1"
 	p.Singleton = true
